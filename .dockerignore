@@ -1,0 +1,9 @@
+**/bin
+**/obj
+**/.idea
+**/.vs
+**/.git
+**/.gitignore
+**/.dockerignore
+**/Dockerfile
+**/*.md
