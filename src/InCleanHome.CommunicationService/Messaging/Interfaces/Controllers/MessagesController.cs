@@ -23,7 +23,7 @@ public class MessagesController(
     IMessageQueryService queryService,
     IRealtimeMessagingProvider messagingProvider) : ControllerBase
 {
-    // ── Twilio Conversations ──────────────────────────────────────────────
+    // Twilio Conversations 
 
     [HttpGet("token")]
     [SwaggerOperation("Get Twilio Token", "Returns a short-lived Twilio Access Token for the current user.")]
@@ -59,7 +59,7 @@ public class MessagesController(
         catch (Exception e) { return BadRequest(new { error = e.Message }); }
     }
 
-    // ── Legacy / local endpoints ──────────────────────────────────────────
+    // Legacy / local endpoints 
 
     [HttpGet("conversations")]
     [SwaggerOperation("List Conversations (legacy)")]

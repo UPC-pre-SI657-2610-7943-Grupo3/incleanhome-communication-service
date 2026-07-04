@@ -40,8 +40,14 @@ public class CommunicationDbContext(DbContextOptions<CommunicationDbContext> opt
         builder.Entity<Notification>().Property(n => n.Body).IsRequired().HasMaxLength(2000);
         builder.Entity<Notification>().Property(n => n.Link).HasMaxLength(500);
         builder.Entity<Notification>().Property(n => n.Read).HasDefaultValue(false);
+        builder.Entity<Notification>().Property(n => n.IdempotencyKey).HasMaxLength(120);
         builder.Entity<Notification>().HasIndex(n => n.UserId);
         builder.Entity<Notification>().HasIndex(n => new { n.UserId, n.Read });
+        // Unique index over IdempotencyKey when set: prevents duplicate
+        // notifications when both the broker delivery and the HTTP fallback
+        // arrive for the same domain event.
+        builder.Entity<Notification>().HasIndex(n => n.IdempotencyKey).IsUnique()
+            .HasFilter("\"idempotency_key\" IS NOT NULL");
 
         // UserDevice
         builder.Entity<UserDevice>().HasKey(d => d.Id);

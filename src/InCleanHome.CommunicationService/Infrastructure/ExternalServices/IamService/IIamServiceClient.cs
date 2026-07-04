@@ -6,14 +6,14 @@ namespace InCleanHome.CommunicationService.Infrastructure.ExternalServices.IamSe
 
 /// <summary>
 /// HTTP client to talk to IAM Service. Used to fetch a user's role (for
-/// notification link routing) and their FCM device token (for push).
+/// notification link routing).
 /// </summary>
 public interface IIamServiceClient
 {
     Task<UserSummary?> GetUserAsync(int userId, string bearerToken);
 }
 
-public record UserSummary(int Id, string Email, string Role, string? DeviceToken);
+public record UserSummary(int Id, string Role);
 
 public class IamServiceClient(
     HttpClient http,
@@ -25,39 +25,28 @@ public class IamServiceClient(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// Calls GET /api/admin/users to fetch all users and filters by id.
-    /// Uses an admin-level token (we need the deviceToken which is not exposed
-    /// to non-admin users). The admin token comes from a service-to-service
-    /// JWT (the gateway's signing key) signed for an admin identity.
+    /// Calls GET /api/v1/users/{id}/public-status (non-admin endpoint) to fetch
+    /// the user's role. We only need the role here to choose the link path for
+    /// the in-app notification (/worker/... vs /client/...).
     /// </summary>
     public async Task<UserSummary?> GetUserAsync(int userId, string bearerToken)
     {
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/admin/users");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/api/v1/users/{userId}/public-status");
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
 
             using var resp = await http.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
-                logger.LogWarning("GET /api/admin/users -> {Status}", resp.StatusCode);
+                logger.LogWarning("GET /api/v1/users/{Id}/public-status -> {Status}", userId, resp.StatusCode);
                 return null;
             }
 
-            var arr = await resp.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
-            if (arr.ValueKind != JsonValueKind.Array) return null;
-
-            foreach (var el in arr.EnumerateArray())
-            {
-                var id = el.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0;
-                if (id != userId) continue;
-                return new UserSummary(
-                    id,
-                    el.TryGetProperty("email", out var e1) ? e1.GetString() ?? "" : "",
-                    el.TryGetProperty("role",  out var e2) ? e2.GetString() ?? "" : "",
-                    el.TryGetProperty("deviceToken", out var e3) ? e3.GetString() : null);
-            }
-            return null;
+            var el = await resp.Content.ReadFromJsonAsync<JsonElement>(JsonOptions);
+            var id = el.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0;
+            var role = el.TryGetProperty("role", out var rEl) ? rEl.GetString() ?? "" : "";
+            return new UserSummary(id, role);
         }
         catch (Exception ex)
         {
