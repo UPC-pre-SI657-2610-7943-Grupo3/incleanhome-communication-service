@@ -10,8 +10,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends wget && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 10001 appuser
-USER appuser
 COPY --from=build --chown=appuser:appuser /app/publish .
+# Entrypoint script: materializa el JSON de Firebase (env var de Key Vault) como archivo
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+USER appuser
 EXPOSE 5005
 ENV ASPNETCORE_URLS=http://+:5005
-ENTRYPOINT ["dotnet", "InCleanHome.CommunicationService.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]
