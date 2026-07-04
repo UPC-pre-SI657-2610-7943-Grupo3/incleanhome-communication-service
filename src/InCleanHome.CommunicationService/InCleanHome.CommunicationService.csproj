@@ -42,4 +42,21 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
   </ItemGroup>
 
+  <!--
+    Firebase credentials file. Placed alongside the .csproj so it gets copied
+    into the publish output (and therefore into /app/firebase-service-account.json
+    inside the Docker container). The FirebaseCloudMessagingAdapter looks at
+    this path automatically — no env var, no volume mount required.
+
+    Condition Exists guards against build failures when the file is missing
+    (e.g. on first clone): push notifications will simply fail to initialize
+    and the service will keep running with that capability disabled.
+  -->
+  <ItemGroup Condition="Exists('firebase-service-account.json')">
+    <None Include="firebase-service-account.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

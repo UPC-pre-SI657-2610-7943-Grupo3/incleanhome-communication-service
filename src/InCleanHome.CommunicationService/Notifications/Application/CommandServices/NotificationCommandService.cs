@@ -14,16 +14,19 @@ public class NotificationCommandService(
     IPushNotificationProvider pushProvider,
     ILogger<NotificationCommandService> logger) : INotificationCommandService
 {
-    public async Task<Notification> Handle(CreateNotificationCommand c)
+    public Task<Notification> Handle(CreateNotificationCommand c)
+        => HandleWithIdempotency(c, idempotencyKey: null);
+
+    public async Task<Notification> HandleWithIdempotency(CreateNotificationCommand c, string? idempotencyKey)
     {
         // 1. Persist in-app notification (history in the web app).
-        var notification = new Notification(c.UserId, c.Type, c.Title, c.Body, c.Link);
+        var notification = new Notification(c.UserId, c.Type, c.Title, c.Body, c.Link, idempotencyKey);
         await repository.AddAsync(notification);
         await unitOfWork.CompleteAsync();
 
         logger.LogInformation(
-            "[Notifications] Created id={Id} for userId={UserId} type={Type}",
-            notification.Id, c.UserId, c.Type);
+            "[Notifications] Created id={Id} for userId={UserId} type={Type} idemKey={Key}",
+            notification.Id, c.UserId, c.Type, idempotencyKey ?? "(none)");
 
         // 2. Push via Firebase. Best-effort: a failure here MUST NOT break the
         //    transaction. The in-app notification is already saved.

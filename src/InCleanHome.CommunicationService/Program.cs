@@ -21,6 +21,7 @@ using InCleanHome.CommunicationService.Notifications.Infrastructure.Firebase;
 using InCleanHome.CommunicationService.Notifications.Infrastructure.Repositories;
 using InCleanHome.CommunicationService.Shared;
 using MassTransit;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
@@ -49,20 +50,7 @@ try
 
     var loadedFromConsul = await ConsulConfigurationLoader.LoadFromConsulAsync(
         builder.Configuration, consulAddress, serviceName);
-
-    // Map TWILIO_* env vars (single underscore) into Twilio:* config keys.
-    // ASP.NET only auto-maps double-underscore (TWILIO__ACCOUNT_SID), so we
-    // do it manually here for nicer .env names.
-    var twilioOverrides = new Dictionary<string, string?>
-    {
-        ["Twilio:AccountSid"]             = Environment.GetEnvironmentVariable("TWILIO_ACCOUNT_SID"),
-        ["Twilio:AuthToken"]              = Environment.GetEnvironmentVariable("TWILIO_AUTH_TOKEN"),
-        ["Twilio:ApiKeySid"]              = Environment.GetEnvironmentVariable("TWILIO_API_KEY_SID"),
-        ["Twilio:ApiKeySecret"]           = Environment.GetEnvironmentVariable("TWILIO_API_KEY_SECRET"),
-        ["Twilio:ConversationServiceSid"] = Environment.GetEnvironmentVariable("TWILIO_CONVERSATIONS_SERVICE_SID"),
-    };
-    builder.Configuration.AddInMemoryCollection(
-        twilioOverrides.Where(kv => !string.IsNullOrWhiteSpace(kv.Value))!);
+    
 
     builder.Services.AddControllers();
     builder.Services.AddEndpointsApiExplorer();
@@ -126,6 +114,7 @@ try
         // Booking events
         x.AddConsumer<BookingCreatedConsumer>();
         x.AddConsumer<BookingConfirmedConsumer>();
+        x.AddConsumer<BookingRescheduledConsumer>();
         x.AddConsumer<BookingRejectedConsumer>();
         x.AddConsumer<BookingCancelledConsumer>();
         x.AddConsumer<BookingCompletedConsumer>();
@@ -139,6 +128,8 @@ try
         x.AddConsumer<ReportSubmittedConsumer>();
         x.AddConsumer<ReportConfirmedConsumer>();
         x.AddConsumer<SuspensionAppealSubmittedConsumer>();
+        x.AddConsumer<SuspensionAppealAcceptedConsumer>();
+        x.AddConsumer<SuspensionAppealRejectedConsumer>();
 
         if (rabbitMqEnabled)
             x.UsingRabbitMq((context, cfg) => { cfg.Host(new Uri(rabbitMqUrl)); cfg.ConfigureEndpoints(context); });
@@ -176,7 +167,10 @@ try
 
     app.UseSerilogRequestLogging();
     app.UseCors();
-    app.MapHealthChecks("/health");
+    app.MapHealthChecks("/health", new HealthCheckOptions
+    {
+        Predicate = check => check.Name != "masstransit-bus"
+    });
     app.MapGet("/", () => Results.Ok(new
     {
         service = serviceName, status = "running",

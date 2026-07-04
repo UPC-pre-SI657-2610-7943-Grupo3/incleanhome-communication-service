@@ -22,6 +22,10 @@ public class NotificationRepository(CommunicationDbContext context)
         => await Context.Set<Notification>()
             .Where(n => n.UserId == userId && !n.Read)
             .ToListAsync();
+
+    public async Task<Notification?> FindByIdempotencyKeyAsync(string idempotencyKey)
+        => await Context.Set<Notification>()
+            .FirstOrDefaultAsync(n => n.IdempotencyKey == idempotencyKey);
 }
 
 public class UserDeviceRepository(CommunicationDbContext context)

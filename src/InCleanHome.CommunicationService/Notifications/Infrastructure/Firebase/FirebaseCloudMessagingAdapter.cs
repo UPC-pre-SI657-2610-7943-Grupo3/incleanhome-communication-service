@@ -24,31 +24,83 @@ public class FirebaseCloudMessagingAdapter : IPushNotificationProvider
         if (FirebaseApp.DefaultInstance != null) return;
 
         // Allow override via env var FIREBASE_CREDENTIALS_JSON (full path).
+        // Some deployments mount the file at /app/firebase-credentials.json,
+        // others bake it into the image alongside the .csproj.
         var envPath = Environment.GetEnvironmentVariable("FIREBASE_CREDENTIALS_JSON");
+
+        // Look at several reasonable locations in order. We accept either
+        // 'firebase-service-account.json' or 'firebase-credentials.json' since
+        // both names exist in different parts of this project.
+        var fileNames = new[] { DefaultCredentialsFileName, "firebase-credentials.json" };
+        var directories = new[]
+        {
+            AppContext.BaseDirectory,           // /app inside the container after publish
+            Directory.GetCurrentDirectory(),    // process CWD (usually /app too)
+            "/app",                             // explicit container path
+            Path.Combine(AppContext.BaseDirectory, ".."), // dev: ../publish
+            ""                                  // bare filename relative to CWD
+        };
+
         var candidatePaths = new List<string>();
         if (!string.IsNullOrWhiteSpace(envPath)) candidatePaths.Add(envPath);
-        candidatePaths.AddRange(new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, DefaultCredentialsFileName),
-            Path.Combine(Directory.GetCurrentDirectory(), DefaultCredentialsFileName),
-            DefaultCredentialsFileName
-        });
+        foreach (var dir in directories)
+            foreach (var name in fileNames)
+                candidatePaths.Add(string.IsNullOrEmpty(dir) ? name : Path.Combine(dir, name));
 
-        var credentialsPath = candidatePaths.FirstOrDefault(File.Exists);
+        string? credentialsPath = null;
+        foreach (var path in candidatePaths)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                if (Directory.Exists(path))
+                {
+                    // This is the exact failure mode the user reported:
+                    // 'firebase-service-account.json' was committed as a
+                    // directory instead of a file. Flag it loud and clear so
+                    // it's not silently ignored.
+                    _logger.LogError(
+                        "[Firebase] Found a DIRECTORY at '{Path}' where a JSON " +
+                        "file was expected. Replace the empty folder with the " +
+                        "real service-account JSON downloaded from Firebase Console " +
+                        "(Project Settings → Service Accounts → Generate new private key).",
+                        path);
+                    continue;
+                }
+                if (File.Exists(path)) { credentialsPath = path; break; }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[Firebase] Skipping candidate {Path}", path);
+            }
+        }
+
         if (credentialsPath is null)
         {
             _logger.LogWarning(
-                "[Firebase] No credentials file found. Looked at: {Paths}. Push notifications will fail.",
-                string.Join(", ", candidatePaths));
+                "[Firebase] No credentials FILE found. Looked at: {Paths}. " +
+                "Push notifications will be disabled until you place a valid " +
+                "service-account JSON at one of those paths (or point " +
+                "FIREBASE_CREDENTIALS_JSON to it).",
+                string.Join(" | ", candidatePaths));
             return;
         }
 
         try
         {
             var jsonContent = File.ReadAllText(credentialsPath);
-            var keyData = JsonSerializer.Deserialize<Dictionary<string, string>>(jsonContent);
-            if (keyData == null || !keyData.ContainsKey("project_id"))
-                throw new InvalidOperationException("Firebase credentials file is invalid (no project_id).");
+            // The previous deserialize-to-Dictionary<string,string> only worked
+            // because every value happened to be a string. With JsonDocument we
+            // get a cleaner check that's robust to numeric fields and avoids the
+            // brittle string-coercion path.
+            using var doc = JsonDocument.Parse(jsonContent);
+            if (!doc.RootElement.TryGetProperty("project_id", out var projectIdElement)
+                || projectIdElement.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(projectIdElement.GetString()))
+                throw new InvalidOperationException(
+                    "Firebase credentials file is invalid: missing 'project_id'.");
+
+            var projectId = projectIdElement.GetString()!;
 
             var jsonBytes = Encoding.UTF8.GetBytes(jsonContent);
             using var memoryStream = new MemoryStream(jsonBytes);
@@ -61,12 +113,12 @@ public class FirebaseCloudMessagingAdapter : IPushNotificationProvider
             FirebaseApp.Create(new AppOptions
             {
                 Credential = googleCredential,
-                ProjectId  = keyData["project_id"]
+                ProjectId  = projectId
             });
 
             _logger.LogInformation(
                 "[Firebase] Initialized with project '{Project}' from {Path}",
-                keyData["project_id"], credentialsPath);
+                projectId, credentialsPath);
         }
         catch (Exception ex)
         {
